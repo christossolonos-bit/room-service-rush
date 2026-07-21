@@ -1,0 +1,17 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+
+# Logs / temp
+*.log
+__pycache__/
+*.pyc
+
+# QA screenshots (generated during testing)
+qa-*.png
+shot-*.png

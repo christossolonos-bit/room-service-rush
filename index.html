@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Room Service Rush — Arcade</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <script>
+    // Never fail silently: surface any script/module error on screen.
+    window.addEventListener("error", function (e) {
+      var m = e.message || (e.error && e.error.message) || "script failed to load";
+      var el = document.getElementById("boot-error");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "boot-error";
+        el.style.cssText = "position:fixed;left:0;right:0;top:0;z-index:99;background:#8a0020;color:#fff;font:12px/1.5 monospace;padding:8px;white-space:pre-wrap";
+        document.body.appendChild(el);
+      }
+      el.textContent = "Load error — try a hard refresh (Ctrl+Shift+R): " + m;
+    });
+  </script>
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div id="app">
+    <header class="brand">
+      <p class="eyebrow">Insert coin · deliver · beat the clock</p>
+      <h1>Room Service Rush</h1>
+    </header>
+
+    <div id="stage">
+      <canvas id="game" width="360" height="240"></canvas>
+
+      <div id="hud" class="hud hidden">
+        <div class="hud-top">
+          <span id="hud-day">DAY 1</span>
+          <span id="hud-tips">$0</span>
+          <span id="hud-floor">FL 1</span>
+          <span id="hud-timer">2:30</span>
+          <span id="hud-combo"></span>
+        </div>
+        <div id="order-list" class="order-list"></div>
+        <div id="carry" class="carry">TRAY EMPTY</div>
+        <div id="prompt" class="prompt-tag hidden"></div>
+      </div>
+
+      <div id="fade" class="fade" aria-hidden="true"></div>
+
+      <div id="panel" class="panel">
+        <div class="card" id="panel-card">
+          <p class="kicker" id="panel-kicker">Grand Hotel</p>
+          <h2 id="panel-title">ROOM SERVICE RUSH</h2>
+          <p id="panel-text">Grab plates at the kitchen pass, race the halls, ride the lift, and deliver to the right door before guests lose patience. Bank tips, buy gear, survive the night shift.</p>
+          <div id="panel-extra"></div>
+          <div class="menu-actions" id="menu-actions"></div>
+          <p class="prompt" id="panel-prompt">PRESS ENTER</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="hint">WASD / ARROWS move · SPACE load &amp; deliver · F lift · SHIFT sprint (if upgraded)</p>
+  </div>
+  <script type="module" src="src/main.js?v=mid2"></script>
+</body>
+</html>
