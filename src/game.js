@@ -1,12 +1,12 @@
-import { held, pressed } from "./input.js?v=mid2";
-import { sfx, unlockAudio } from "./audio.js?v=mid2";
+import { held, pressed } from "./input.js?v=mid3";
+import { sfx, unlockAudio } from "./audio.js?v=mid3";
 import {
   loadSave, writeSave, UPGRADES, buyUpgrade, canBuy, upgradeLevel,
   carryCapacity, timerBonus, sprintPower, hasRadio, busboyCount,
-} from "./meta.js?v=mid2";
+} from "./meta.js?v=mid3";
 import {
   buildFloor, drawWaiter, WORLD_W, WALK, KITCHEN_X, ELEVATOR_X, MID_LIFTS,
-} from "./sprites.js?v=mid2";
+} from "./sprites.js?v=mid3";
 
 const VIEW_W = 360;
 const VIEW_H = 240;
@@ -40,9 +40,11 @@ export class Game {
     this.combo = 0;
     this.bestCombo = 0;
     this.tipsEarned = 0;
+    this.earlyBonus = 0;
     this.delivered = 0;
     this.needed = 5;
-    this.shiftTime = 150;
+    this.shiftTime = 100;
+    this.rushTimer = 0;
     this.liftBusy = 0;
     this.toast = "";
     this._toastT = 0;
@@ -52,6 +54,7 @@ export class Game {
       day: document.getElementById("hud-day"),
       tips: document.getElementById("hud-tips"),
       floor: document.getElementById("hud-floor"),
+      goal: document.getElementById("hud-goal"),
       timer: document.getElementById("hud-timer"),
       combo: document.getElementById("hud-combo"),
       orders: document.getElementById("order-list"),
@@ -165,9 +168,12 @@ export class Game {
     this.combo = 0;
     this.bestCombo = 0;
     this.tipsEarned = 0;
+    this.earlyBonus = 0;
     this.delivered = 0;
-    this.needed = 5 + Math.min(8, this.save.day);
-    this.shiftTime = 130 + Math.min(90, this.save.day * 6);
+    this.needed = this.quotaForShift();
+    // Shorter, sharper shifts — denser work, less idle clock
+    this.shiftTime = 90 + Math.min(50, this.save.day * 3);
+    this.rushTimer = 36 + Math.random() * 10;
     this.liftBusy = 0;
     this.floorIdx = 0;
     this.player.cx = 200;
@@ -175,23 +181,48 @@ export class Game {
     this.player.dir = "right";
     this.player.walk = 0;
     this.camX = this.clampCam(this.player.cx - VIEW_W / 2);
-    this.spawnOrders(4);
+    this.spawnOrders(this.boardTarget());
     this.updateHud();
+  }
+
+  /** How many deliveries this shift demands — scales with day AND upgrades. */
+  quotaForShift() {
+    const power =
+      upgradeLevel(this.save, "speed") +
+      upgradeLevel(this.save, "trolley") +
+      busboyCount(this.save) +
+      sprintPower(this.save);
+    return 6 + Math.min(10, this.save.day) + power * 2;
+  }
+
+  /** Keep roughly tray capacity + buffer live so the board never feels empty. */
+  boardTarget() {
+    return Math.min(
+      this.allRooms.length,
+      this.capacity() + 2 + Math.min(3, (this.save.day / 2) | 0)
+    );
   }
 
   capacity() {
     return carryCapacity(this.save) + busboyCount(this.save);
   }
 
+  activeCount() {
+    return this.orders.filter((o) => !o.done).length;
+  }
+
   spawnOrders(n) {
+    const maxBoard = Math.max(this.boardTarget() + 1, 8);
+    let spawned = 0;
     for (let i = 0; i < n; i++) {
-      if (this.orders.length >= 7) break;
+      if (this.activeCount() >= maxBoard) break;
       const pool = this.allRooms.filter(
         (r) => !this.orders.some((o) => o.room === r && !o.done)
       );
       if (!pool.length) break;
       const room = pool[(Math.random() * pool.length) | 0];
-      const base = 42 + Math.random() * 22;
+      // Slightly tighter timers so upgrades matter without making idle time
+      const base = 34 + Math.random() * 18;
       const max = base * timerBonus(this.save);
       this.orders.push({
         id: Math.random().toString(36).slice(2, 8),
@@ -201,7 +232,9 @@ export class Game {
         max,
         done: false,
       });
+      spawned++;
     }
+    return spawned;
   }
 
   /* ------------------------------------------------------------ loop */
@@ -258,12 +291,30 @@ export class Game {
     this.updatePrompt();
     this.updateHud();
 
-    // keep the board stocked
-    const active = this.orders.filter((o) => !o.done).length;
-    if (active < 3) this.spawnOrders(2);
+    // Keep the board stocked relative to tray power — no empty-hall lulls
+    const target = this.boardTarget();
+    const active = this.activeCount();
+    if (active < target) this.spawnOrders(target - active);
 
-    if (this.shiftTime <= 0) { this.endShift(this.delivered >= Math.ceil(this.needed * 0.6)); return; }
-    if (this.delivered >= this.needed) { this.endShift(true); return; }
+    // Mid-shift rush waves dump extra tickets
+    this.rushTimer -= dt;
+    if (this.rushTimer <= 0) {
+      this.rushTimer = 34 + Math.random() * 12;
+      const dumped = this.spawnOrders(Math.min(3, this.capacity() + 1));
+      if (dumped > 0) {
+        sfx.jump();
+        this.flashToast("RUSH HOUR!");
+        this.addFloat(this.player.cx, this.player.cy - 28, "RUSH!", "#ff5a7a");
+      }
+    }
+
+    if (this.delivered >= this.needed) {
+      this.endShift(true);
+      return;
+    }
+    if (this.shiftTime <= 0) {
+      this.endShift(this.delivered >= Math.ceil(this.needed * 0.6));
+    }
   }
 
   updatePlayer(dt) {
@@ -413,15 +464,25 @@ export class Game {
 
   endShift(success) {
     if (success) {
+      // Bonus for finishing the quota before the clock runs out
+      this.earlyBonus = 0;
+      if (this.shiftTime > 0) {
+        this.earlyBonus = Math.max(10, Math.round(this.shiftTime * 0.45));
+        this.tipsEarned += this.earlyBonus;
+        this.save.tips += this.earlyBonus;
+      }
       this.mode = "clear";
       this.save.day += 1;
       this.save.bestDay = Math.max(this.save.bestDay, this.save.day);
       writeSave(this.save);
       sfx.win();
+      const earlyLine = this.earlyBonus
+        ? ` Early clear bonus +$${this.earlyBonus}.`
+        : "";
       this.showPanel(
         `Day ${this.save.day - 1} cleared`,
         "SHIFT COMPLETE",
-        `Delivered ${this.delivered}. Best combo x${this.bestCombo}. Tips this shift $${this.tipsEarned}. Bank $${this.save.tips}.`,
+        `Delivered ${this.delivered}/${this.needed}. Best combo x${this.bestCombo}. Tips $${this.tipsEarned}.${earlyLine} Bank $${this.save.tips}.`,
         { prompt: "PRESS ENTER — SPEND TIPS" }
       );
     } else {
@@ -463,6 +524,7 @@ export class Game {
     this.hud.day.textContent = `DAY ${this.save.day}`;
     this.hud.tips.textContent = `$${this.save.tips}`;
     this.hud.floor.textContent = `FL ${this.floorIdx + 1}`;
+    if (this.hud.goal) this.hud.goal.textContent = `${this.delivered}/${this.needed}`;
     const t = Math.max(0, Math.ceil(this.shiftTime));
     this.hud.timer.textContent = `${(t / 60) | 0}:${String(t % 60).padStart(2, "0")}`;
     this.hud.combo.textContent = this.combo >= 2 ? `COMBO x${this.combo}` : "";

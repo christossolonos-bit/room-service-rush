@@ -110,6 +110,7 @@ body {
 #hud-day { color: var(--gold); }
 #hud-tips { color: var(--teal); }
 #hud-floor { color: var(--cream); }
+#hud-goal { color: #ffd080; }
 #hud-timer { color: #fff; margin-left: auto; }
 #hud-combo { color: var(--rose); }
 

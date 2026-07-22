@@ -1,4 +1,4 @@
-import { Game } from "./game.js?v=mid2";
+import { Game } from "./game.js?v=mid3";
 
 const canvas = document.getElementById("game");
 const game = new Game(canvas);
