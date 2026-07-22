@@ -36,11 +36,12 @@ const PAL = {
 
 /* -------------------------------------------------------- waiter sprite */
 
-export function drawWaiter(ctx, cx, cy, dir, walkT, carrying) {
+export function drawWaiter(ctx, cx, cy, dir, walkT, carrying, role = "waiter") {
   cx = Math.round(cx);
   cy = Math.round(cy);
   const moving = walkT > 0;
   const step = moving ? (Math.floor(walkT * 8) % 2 === 0 ? 1 : -1) : 0;
+  const busboy = role === "busboy";
 
   // shadow
   ctx.globalAlpha = 0.32;
@@ -51,9 +52,9 @@ export function drawWaiter(ctx, cx, cy, dir, walkT, carrying) {
   ctx.globalAlpha = 1;
 
   if (dir === "left" || dir === "right") {
-    drawSide(ctx, cx, cy, dir === "right", step, carrying);
+    drawSide(ctx, cx, cy, dir === "right", step, carrying, busboy);
   } else {
-    drawFrontBack(ctx, cx, cy, dir === "up", step, carrying);
+    drawFrontBack(ctx, cx, cy, dir === "up", step, carrying, busboy);
   }
 }
 
@@ -62,7 +63,7 @@ function p(ctx, x, y, w, h, c) {
   ctx.fillRect(x | 0, y | 0, w, h);
 }
 
-function drawFrontBack(ctx, cx, cy, back, step, carrying) {
+function drawFrontBack(ctx, cx, cy, back, step, carrying, busboy) {
   const lx = cx - 4;
   // legs (alternate)
   p(ctx, lx, cy - 6 - Math.max(0, step), 3, 5, PAL.pants);
@@ -70,26 +71,30 @@ function drawFrontBack(ctx, cx, cy, back, step, carrying) {
   p(ctx, cx + 1, cy - 6 - Math.max(0, -step), 3, 5, PAL.pants);
   p(ctx, cx + 1, cy - 1 - Math.max(0, -step), 3, 1, PAL.shoe);
 
-  // torso (vest)
-  p(ctx, cx - 5, cy - 15, 10, 10, PAL.vest);
-  p(ctx, cx - 5, cy - 15, 10, 1, PAL.vestHi);
+  // torso
+  p(ctx, cx - 5, cy - 15, 10, 10, busboy ? "#2a3548" : PAL.vest);
+  p(ctx, cx - 5, cy - 15, 10, 1, busboy ? "#3a4558" : PAL.vestHi);
 
   if (!back) {
-    // shirt V + bow + buttons
-    p(ctx, cx - 1, cy - 14, 2, 8, PAL.shirt);
-    p(ctx, cx - 2, cy - 15, 4, 2, PAL.bow);
-    p(ctx, cx, cy - 11, 1, 1, PAL.gold);
-    p(ctx, cx, cy - 9, 1, 1, PAL.gold);
-  } else {
-    p(ctx, cx - 5, cy - 15, 10, 10, PAL.vest);
-    p(ctx, cx - 1, cy - 14, 2, 3, PAL.vestHi);
+    if (busboy) {
+      // white apron
+      p(ctx, cx - 3, cy - 14, 6, 9, "#e8e4dc");
+      p(ctx, cx - 1, cy - 12, 2, 2, "#c0b8b0");
+    } else {
+      p(ctx, cx - 1, cy - 14, 2, 8, PAL.shirt);
+      p(ctx, cx - 2, cy - 15, 4, 2, PAL.bow);
+      p(ctx, cx, cy - 11, 1, 1, PAL.gold);
+      p(ctx, cx, cy - 9, 1, 1, PAL.gold);
+    }
+  } else if (busboy) {
+    p(ctx, cx - 4, cy - 10, 8, 5, "#e8e4dc");
   }
 
   // arms
   const armY = carrying ? cy - 15 : cy - 14;
   const handY = carrying ? cy - 12 : cy - 8;
-  p(ctx, cx - 7, armY, 2, handY - armY, PAL.vest);
-  p(ctx, cx + 5, armY, 2, handY - armY, PAL.vest);
+  p(ctx, cx - 7, armY, 2, handY - armY, busboy ? "#2a3548" : PAL.vest);
+  p(ctx, cx + 5, armY, 2, handY - armY, busboy ? "#2a3548" : PAL.vest);
   p(ctx, cx - 7, handY, 2, 2, PAL.glove);
   p(ctx, cx + 5, handY, 2, 2, PAL.glove);
 
@@ -98,62 +103,66 @@ function drawFrontBack(ctx, cx, cy, back, step, carrying) {
   if (back) {
     p(ctx, cx - 4, cy - 23, 8, 7, PAL.hair);
   } else {
-    // hair cap + sideburns
     p(ctx, cx - 4, cy - 23, 8, 2, PAL.hair);
     p(ctx, cx - 4, cy - 23, 1, 5, PAL.hair);
     p(ctx, cx + 3, cy - 23, 1, 5, PAL.hair);
-    // eyes + brow
     p(ctx, cx - 2, cy - 19, 1, 1, PAL.eye);
     p(ctx, cx + 1, cy - 19, 1, 1, PAL.eye);
     p(ctx, cx - 1, cy - 16, 2, 1, PAL.skinSh);
   }
 
-  if (carrying) drawTray(ctx, cx, cy - 13, back);
+  if (carrying) {
+    if (busboy) drawBin(ctx, cx, cy - 12);
+    else drawTray(ctx, cx, cy - 13, back);
+  }
 }
 
-function drawSide(ctx, cx, cy, faceRight, step, carrying) {
+function drawSide(ctx, cx, cy, faceRight, step, carrying, busboy) {
   const s = faceRight ? 1 : -1;
-  const fx = (dx) => cx + s * dx; // mirror helper for x offsets
+  const fx = (dx) => cx + s * dx;
 
-  // legs front/back stride
   p(ctx, fx(-1) - 1, cy - 6 - Math.max(0, step), 3, 5, PAL.pants);
   p(ctx, fx(-1) - 1, cy - 1 - Math.max(0, step), 3, 1, PAL.shoe);
   p(ctx, fx(2) - 1, cy - 6 - Math.max(0, -step), 3, 5, PAL.pants);
   p(ctx, fx(2) - 1, cy - 1 - Math.max(0, -step), 3, 1, PAL.shoe);
 
-  // torso (narrower profile)
-  const bx = Math.min(fx(-3), fx(4)) ;
-  p(ctx, bx, cy - 15, 7, 10, PAL.vest);
-  p(ctx, bx, cy - 15, 7, 1, PAL.vestHi);
-  // bow peeking
-  p(ctx, fx(2), cy - 15, 2, 2, PAL.bow);
+  const bx = Math.min(fx(-3), fx(4));
+  p(ctx, bx, cy - 15, 7, 10, busboy ? "#2a3548" : PAL.vest);
+  p(ctx, bx, cy - 15, 7, 1, busboy ? "#3a4558" : PAL.vestHi);
+  if (busboy) p(ctx, fx(0) - 1, cy - 14, 4, 8, "#e8e4dc");
+  else p(ctx, fx(2), cy - 15, 2, 2, PAL.bow);
 
-  // front arm reaching ahead
   const armY = carrying ? cy - 15 : cy - 13;
   const handY = carrying ? cy - 12 : cy - 8;
-  p(ctx, fx(3), armY, 2, handY - armY, PAL.vest);
+  p(ctx, fx(3), armY, 2, handY - armY, busboy ? "#2a3548" : PAL.vest);
   p(ctx, fx(3), handY, 2, 2, PAL.glove);
 
-  // head
   p(ctx, fx(-2) - (faceRight ? 0 : 3), cy - 23, 7, 8, PAL.skin);
-  // hair on the back of the head
-  p(ctx, fx(-3) - (faceRight ? 0 : 0), cy - 23, 3, 7, PAL.hair);
+  p(ctx, fx(-3), cy - 23, 3, 7, PAL.hair);
   p(ctx, fx(-2) - (faceRight ? 0 : 3), cy - 23, 7, 2, PAL.hair);
-  // single eye toward the front
   p(ctx, fx(2), cy - 19, 1, 1, PAL.eye);
-  // nose hint
   p(ctx, fx(3), cy - 18, 1, 1, PAL.skinSh);
 
-  if (carrying) drawTray(ctx, fx(3), cy - 13, false);
+  if (carrying) {
+    if (busboy) drawBin(ctx, fx(3), cy - 12);
+    else drawTray(ctx, fx(3), cy - 13, false);
+  }
 }
 
 function drawTray(ctx, cx, cy, behind) {
   ctx.globalAlpha = behind ? 0.85 : 1;
-  p(ctx, cx - 5, cy + 1, 10, 2, PAL.tray);       // plate
-  p(ctx, cx - 4, cy - 2, 8, 3, PAL.dome);        // cloche dome
-  p(ctx, cx - 4, cy - 2, 8, 1, PAL.domeHi);      // highlight
-  p(ctx, cx - 1, cy - 3, 2, 1, PAL.gold);        // knob
+  p(ctx, cx - 5, cy + 1, 10, 2, PAL.tray);
+  p(ctx, cx - 4, cy - 2, 8, 3, PAL.dome);
+  p(ctx, cx - 4, cy - 2, 8, 1, PAL.domeHi);
+  p(ctx, cx - 1, cy - 3, 2, 1, PAL.gold);
   ctx.globalAlpha = 1;
+}
+
+function drawBin(ctx, cx, cy) {
+  p(ctx, cx - 5, cy, 10, 7, "#5a4030");
+  p(ctx, cx - 5, cy, 10, 1, "#7a5840");
+  p(ctx, cx - 3, cy - 2, 3, 2, "#d2dae2");
+  p(ctx, cx + 1, cy - 3, 3, 2, "#c8b090");
 }
 
 /* --------------------------------------------------------- floor canvas */

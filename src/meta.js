@@ -11,28 +11,28 @@ export const UPGRADES = [
   {
     id: "trolley",
     name: "Service Trolley",
-    desc: "Carry +1 order per level (start 1).",
+    desc: "Waiter: +1 tray slot. Busboy: +1 bin slot.",
     max: 3,
     costs: [60, 120, 200],
   },
   {
     id: "timer",
     name: "Cloche Covers",
-    desc: "Guest timers last longer.",
+    desc: "Guest / dirty-room timers last longer.",
     max: 3,
     costs: [50, 100, 180],
   },
   {
     id: "busboy",
-    name: "Hire Busboy",
-    desc: "Helper grabs ready plates from the pass.",
+    name: "Extra Hands",
+    desc: "Bigger load capacity on either shift.",
     max: 2,
     costs: [100, 220],
   },
   {
     id: "radio",
     name: "Hall Radio",
-    desc: "See order rooms highlighted on the map.",
+    desc: "Highlight doors that still need work.",
     max: 1,
     costs: [75],
   },
@@ -60,6 +60,7 @@ export function defaultSave() {
     },
     survivalBest: 0,
     unlockedSurvival: false,
+    unlockedBusboy: false,
   };
 }
 
@@ -69,6 +70,8 @@ export function loadSave() {
     if (!raw) return defaultSave();
     const data = { ...defaultSave(), ...JSON.parse(raw) };
     data.upgrades = { ...defaultSave().upgrades, ...(data.upgrades || {}) };
+    // Clear day 1 once → unlock busboy forever
+    if (data.day >= 2) data.unlockedBusboy = true;
     return data;
   } catch {
     return defaultSave();
@@ -77,6 +80,10 @@ export function loadSave() {
 
 export function writeSave(save) {
   localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+}
+
+export function hasBusboyMode(save) {
+  return !!(save.unlockedBusboy || save.day >= 2);
 }
 
 export function upgradeLevel(save, id) {

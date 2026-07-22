@@ -1,16 +1,17 @@
-import { held, pressed } from "./input.js?v=mid3";
-import { sfx, unlockAudio } from "./audio.js?v=mid3";
+import { held, pressed } from "./input.js?v=mid5";
+import { sfx, unlockAudio } from "./audio.js?v=mid5";
 import {
   loadSave, writeSave, UPGRADES, buyUpgrade, canBuy, upgradeLevel,
-  carryCapacity, timerBonus, sprintPower, hasRadio, busboyCount,
-} from "./meta.js?v=mid3";
+  carryCapacity, timerBonus, sprintPower, hasRadio, busboyCount, hasBusboyMode,
+} from "./meta.js?v=mid5";
 import {
   buildFloor, drawWaiter, WORLD_W, WALK, KITCHEN_X, ELEVATOR_X, MID_LIFTS,
-} from "./sprites.js?v=mid3";
+} from "./sprites.js?v=mid5";
 
 const VIEW_W = 360;
 const VIEW_H = 240;
 const FOODS = ["STEAK", "SOUP", "CLUB", "BUBBLY", "PASTA", "CAKE", "COFFEE", "TART"];
+const DIRTY = ["PLATES", "GLASSES", "TRAY", "CUPS", "NAPKINS", "CART"];
 
 export class Game {
   constructor(canvas) {
@@ -20,6 +21,7 @@ export class Game {
 
     this.save = loadSave();
     this.mode = "title";
+    this.job = "waiter"; // waiter | busboy
     this.time = 0;
     this.last = performance.now();
 
@@ -105,13 +107,43 @@ export class Game {
     this.showPanel(
       "Grand Hotel · Night Shift",
       "ROOM SERVICE RUSH",
-      "Load plates at the kitchen, sprint the halls, ride the lift between floors, and deliver to the right door before guests storm out. Chain deliveries for combo tips.",
+      "Pick your post. Waiters run hot plates to rooms. Busboys clear dirty trays from the halls and dump them back at the kitchen.",
       {
         actions: [
-          { label: "START SHIFT", onClick: () => this.startShift() },
+          { label: "CHOOSE SHIFT", onClick: () => this.showRoleSelect() },
           { label: "UPGRADES", secondary: true, onClick: () => this.showHub() },
         ],
       }
+    );
+  }
+
+  showRoleSelect() {
+    this.mode = "title";
+    this.hud.root.classList.add("hidden");
+    const unlocked = hasBusboyMode(this.save);
+    const actions = [
+      { label: "WAITER", onClick: () => this.startShift("waiter") },
+    ];
+    if (unlocked) {
+      actions.push({ label: "BUSBOY", onClick: () => this.startShift("busboy") });
+    } else {
+      actions.push({
+        label: "BUSBOY (LOCKED)",
+        secondary: true,
+        onClick: () => {
+          this.panelText.textContent = "Busboy unlocks after you clear a waiter shift (finish day 1).";
+        },
+      });
+    }
+    actions.push({ label: "BACK", secondary: true, onClick: () => this.showTitle() });
+
+    this.showPanel(
+      unlocked ? "Staff roster open" : "Trainee · clear day 1 to unlock busboy",
+      "PICK YOUR POST",
+      unlocked
+        ? "WAITER: load at kitchen, deliver to doors.\nBUSBOY: grab dirty trays from doors, dump at the kitchen."
+        : "Start as a waiter. Survive your first night and the busboy post unlocks.",
+      { actions }
     );
   }
 
@@ -137,7 +169,7 @@ export class Game {
       {
         extra: `<div class="upgrade-grid">${rows}</div>`,
         actions: [
-          { label: "START SHIFT", onClick: () => this.startShift() },
+          { label: "CHOOSE SHIFT", onClick: () => this.showRoleSelect() },
           { label: "BACK", secondary: true, onClick: () => this.showTitle() },
         ],
       }
@@ -156,9 +188,10 @@ export class Game {
 
   /* ------------------------------------------------------------ shift */
 
-  startShift() {
+  startShift(job = "waiter") {
     unlockAudio();
     sfx.start();
+    this.job = job === "busboy" ? "busboy" : "waiter";
     this.mode = "play";
     this.hidePanel();
     this.hud.root.classList.remove("hidden");
@@ -171,35 +204,38 @@ export class Game {
     this.earlyBonus = 0;
     this.delivered = 0;
     this.needed = this.quotaForShift();
-    // Shorter, sharper shifts — denser work, less idle clock
     this.shiftTime = 90 + Math.min(50, this.save.day * 3);
-    this.rushTimer = 36 + Math.random() * 10;
+    this.rushTimer = 28 + Math.random() * 10;
     this.liftBusy = 0;
+    this._closingToast = false;
     this.floorIdx = 0;
-    this.player.cx = 200;
+    this.player.cx = this.job === "busboy" ? 280 : 200;
     this.player.cy = 130;
     this.player.dir = "right";
     this.player.walk = 0;
     this.camX = this.clampCam(this.player.cx - VIEW_W / 2);
-    this.spawnOrders(this.boardTarget());
+    this.spawnJobs(this.boardTarget());
+    this.flashToast(this.job === "busboy" ? "BUSBOY SHIFT" : "WAITER SHIFT");
     this.updateHud();
   }
 
-  /** How many deliveries this shift demands — scales with day AND upgrades. */
+  /** How many clears this shift demands — scales with day AND upgrades. */
   quotaForShift() {
     const power =
       upgradeLevel(this.save, "speed") +
       upgradeLevel(this.save, "trolley") +
       busboyCount(this.save) +
       sprintPower(this.save);
-    return 6 + Math.min(10, this.save.day) + power * 2;
+    const base = this.job === "busboy" ? 8 : 6;
+    return base + Math.min(10, this.save.day) + power * 2;
   }
 
-  /** Keep roughly tray capacity + buffer live so the board never feels empty. */
+  /** Keep roughly tray/bin capacity + buffer live. */
   boardTarget() {
+    const extra = this.job === "busboy" ? 1 : 0;
     return Math.min(
       this.allRooms.length,
-      this.capacity() + 2 + Math.min(3, (this.save.day / 2) | 0)
+      this.capacity() + 2 + extra + Math.min(3, (this.save.day / 2) | 0)
     );
   }
 
@@ -209,6 +245,10 @@ export class Game {
 
   activeCount() {
     return this.orders.filter((o) => !o.done).length;
+  }
+
+  spawnJobs(n) {
+    return this.job === "busboy" ? this.spawnDirty(n) : this.spawnOrders(n);
   }
 
   spawnOrders(n) {
@@ -221,13 +261,40 @@ export class Game {
       );
       if (!pool.length) break;
       const room = pool[(Math.random() * pool.length) | 0];
-      // Slightly tighter timers so upgrades matter without making idle time
       const base = 34 + Math.random() * 18;
       const max = base * timerBonus(this.save);
       this.orders.push({
         id: Math.random().toString(36).slice(2, 8),
         room,
         food: FOODS[(Math.random() * FOODS.length) | 0],
+        kind: "order",
+        time: max,
+        max,
+        done: false,
+      });
+      spawned++;
+    }
+    return spawned;
+  }
+
+  spawnDirty(n) {
+    const maxBoard = Math.max(this.boardTarget() + 1, 9);
+    let spawned = 0;
+    for (let i = 0; i < n; i++) {
+      if (this.activeCount() >= maxBoard) break;
+      const pool = this.allRooms.filter(
+        (r) => !this.orders.some((o) => o.room === r && !o.done)
+      );
+      if (!pool.length) break;
+      const room = pool[(Math.random() * pool.length) | 0];
+      // Dirty rooms are impatient — slightly shorter timers
+      const base = 28 + Math.random() * 16;
+      const max = base * timerBonus(this.save);
+      this.orders.push({
+        id: Math.random().toString(36).slice(2, 8),
+        room,
+        food: DIRTY[(Math.random() * DIRTY.length) | 0],
+        kind: "dirty",
         time: max,
         max,
         done: false,
@@ -255,7 +322,7 @@ export class Game {
     this.floats = this.floats.filter((f) => f.life > 0);
 
     if (this.mode === "title" || this.mode === "hub") {
-      if (pressed("confirm") && this.mode === "title") this.startShift();
+      if (pressed("confirm") && this.mode === "title") this.showRoleSelect();
       return;
     }
     if (this.mode === "clear" || this.mode === "fail") {
@@ -264,7 +331,6 @@ export class Game {
     }
 
     this.liftBusy = Math.max(0, this.liftBusy - dt);
-    this.shiftTime -= dt;
 
     // order timers
     for (const o of this.orders) {
@@ -277,7 +343,7 @@ export class Game {
         sfx.hurt();
         const info = this.roomInfo.get(o.room);
         this.addFloat(info.x, info.iy - 20, "WALKED OUT", "#ff5a7a");
-        this.flashToast(`Room ${o.room} gave up!`);
+        this.flashToast(this.job === "busboy" ? `Room ${o.room} complained!` : `Room ${o.room} gave up!`);
       }
     }
 
@@ -288,25 +354,36 @@ export class Game {
       if (pressed("elevator")) this.useElevator();
     }
 
-    this.updatePrompt();
-    this.updateHud();
+    // No tickets left (board + tray empty) → race the clock; don't refill.
+    const idle = this.activeCount() === 0 && this.carrying.length === 0;
 
-    // Keep the board stocked relative to tray power — no empty-hall lulls
-    const target = this.boardTarget();
-    const active = this.activeCount();
-    if (active < target) this.spawnOrders(target - active);
-
-    // Mid-shift rush waves dump extra tickets
-    this.rushTimer -= dt;
-    if (this.rushTimer <= 0) {
-      this.rushTimer = 34 + Math.random() * 12;
-      const dumped = this.spawnOrders(Math.min(3, this.capacity() + 1));
-      if (dumped > 0) {
-        sfx.jump();
-        this.flashToast("RUSH HOUR!");
-        this.addFloat(this.player.cx, this.player.cy - 28, "RUSH!", "#ff5a7a");
+    // Rush waves keep pressure while tickets are still out
+    if (!idle && this.delivered < this.needed) {
+      this.rushTimer -= dt;
+      if (this.rushTimer <= 0) {
+        this.rushTimer = 34 + Math.random() * 12;
+        const need = Math.max(0, this.boardTarget() - this.activeCount());
+        const dumped = this.spawnJobs(Math.max(need, Math.min(3, this.capacity() + 1)));
+        if (dumped > 0) {
+          sfx.jump();
+          this.flashToast(this.job === "busboy" ? "DIRTY RUSH!" : "RUSH HOUR!");
+          this.addFloat(this.player.cx, this.player.cy - 28, "RUSH!", "#ff5a7a");
+        }
       }
     }
+
+    this.shiftTime -= dt * (idle ? 14 : 1);
+    if (idle) {
+      if (!this._closingToast) {
+        this._closingToast = true;
+        this.flashToast(this.job === "busboy" ? "No trays — wrapping up" : "No tickets — wrapping up");
+      }
+    } else {
+      this._closingToast = false;
+    }
+
+    this.updatePrompt();
+    this.updateHud();
 
     if (this.delivered >= this.needed) {
       this.endShift(true);
@@ -381,9 +458,22 @@ export class Game {
   }
 
   interact() {
+    if (this.job === "busboy") {
+      this.interactBusboy();
+      return;
+    }
     if (this.atKitchen()) { this.loadFromKitchen(); return; }
     const door = this.nearestDoor();
     if (door) this.deliverTo(door);
+  }
+
+  interactBusboy() {
+    if (this.atKitchen()) {
+      this.dumpAtKitchen();
+      return;
+    }
+    const door = this.nearestDoor();
+    if (door) this.pickupDirty(door);
   }
 
   loadFromKitchen() {
@@ -402,6 +492,60 @@ export class Game {
     sfx.pickup();
     this.flashToast(`Loaded ${take.length} · ${take.map((o) => o.room).join(",")}`);
     this.addFloat(this.player.cx, this.player.cy - 26, "LOADED", "#40d0a0");
+  }
+
+  pickupDirty(door) {
+    if (this.carrying.length >= this.capacity()) {
+      this.flashToast("Bin full — dump at kitchen");
+      return;
+    }
+    const job = this.orders.find(
+      (o) => !o.done && o.room === door.room && !this.carrying.some((c) => c.id === o.id)
+    );
+    if (!job) {
+      this.flashToast(this.orders.some((o) => !o.done && o.room === door.room) ? "Already grabbed" : "Room is clean");
+      return;
+    }
+    this.carrying.push(job);
+    sfx.pickup();
+    this.addFloat(door.x, door.iy - 22, "GRABBED", "#40d0a0");
+    this.flashToast(`${job.food} from ${door.room}`);
+  }
+
+  dumpAtKitchen() {
+    if (!this.carrying.length) {
+      this.flashToast("Bin empty — clear rooms");
+      return;
+    }
+    let tips = 0;
+    let onTimeCount = 0;
+    for (const item of this.carrying) {
+      const order = this.orders.find((o) => o.id === item.id);
+      if (order) order.done = true;
+      this.delivered++;
+      const onTime = item.time > 0;
+      if (onTime) {
+        this.combo++;
+        onTimeCount++;
+      } else {
+        this.combo = 0;
+      }
+      this.bestCombo = Math.max(this.bestCombo, this.combo);
+      const mult = 1 + Math.floor(this.combo / 3) * 0.5;
+      const speedBonus = onTime ? Math.max(0, (item.time / item.max) * 10) | 0 : 0;
+      tips += Math.round((8 + speedBonus) * (onTime ? mult : 0.4));
+    }
+    const n = this.carrying.length;
+    this.carrying = [];
+    this.tipsEarned += tips;
+    this.save.tips += tips;
+    writeSave(this.save);
+    sfx.win();
+    this.addFloat(this.player.cx, this.player.cy - 26, `+$${tips}`, "#f0c040");
+    if (onTimeCount >= 2) {
+      this.addFloat(this.player.cx, this.player.cy - 38, `COMBO x${this.combo}`, "#ff5a7a");
+    }
+    this.flashToast(`Dumped ${n} · +$${tips}`);
   }
 
   deliverTo(door) {
@@ -464,7 +608,6 @@ export class Game {
 
   endShift(success) {
     if (success) {
-      // Bonus for finishing the quota before the clock runs out
       this.earlyBonus = 0;
       if (this.shiftTime > 0) {
         this.earlyBonus = Math.max(10, Math.round(this.shiftTime * 0.45));
@@ -474,24 +617,29 @@ export class Game {
       this.mode = "clear";
       this.save.day += 1;
       this.save.bestDay = Math.max(this.save.bestDay, this.save.day);
+      const justUnlocked = !this.save.unlockedBusboy && this.save.day >= 2;
+      this.save.unlockedBusboy = true;
       writeSave(this.save);
       sfx.win();
       const earlyLine = this.earlyBonus
         ? ` Early clear bonus +$${this.earlyBonus}.`
         : "";
+      const unlockLine = justUnlocked ? " Busboy shift unlocked!" : "";
+      const verb = this.job === "busboy" ? "Cleared" : "Delivered";
       this.showPanel(
-        `Day ${this.save.day - 1} cleared`,
+        `${this.job === "busboy" ? "Busboy" : "Waiter"} · Day ${this.save.day - 1}`,
         "SHIFT COMPLETE",
-        `Delivered ${this.delivered}/${this.needed}. Best combo x${this.bestCombo}. Tips $${this.tipsEarned}.${earlyLine} Bank $${this.save.tips}.`,
+        `${verb} ${this.delivered}/${this.needed}. Best combo x${this.bestCombo}. Tips $${this.tipsEarned}.${earlyLine}${unlockLine} Bank $${this.save.tips}.`,
         { prompt: "PRESS ENTER — SPEND TIPS" }
       );
     } else {
       this.mode = "fail";
       sfx.hurt();
+      const verb = this.job === "busboy" ? "cleared" : "delivered";
       this.showPanel(
         "Guests furious",
         "SHIFT FAILED",
-        `Only ${this.delivered}/${this.needed} delivered. Tips kept $${this.tipsEarned}.`,
+        `Only ${this.delivered}/${this.needed} ${verb}. Tips kept $${this.tipsEarned}.`,
         { prompt: "PRESS ENTER — TRY AGAIN" }
       );
     }
@@ -502,6 +650,30 @@ export class Game {
 
   updatePrompt() {
     const el = this.hud.prompt;
+    if (this.job === "busboy") {
+      if (this.atKitchen()) {
+        el.textContent = this.carrying.length ? "SPACE — Dump dirty bin" : "Kitchen pass";
+        el.classList.remove("hidden");
+      } else if (this.liftAt()) {
+        el.textContent = `F — Lift to floor ${this.floorIdx === 0 ? 2 : 1}`;
+        el.classList.remove("hidden");
+      } else {
+        const door = this.nearestDoor();
+        if (door) {
+          const dirty = this.orders.find(
+            (o) => !o.done && o.room === door.room && !this.carrying.some((c) => c.id === o.id)
+          );
+          el.textContent = dirty
+            ? `SPACE — Grab ${dirty.food} (${door.room})`
+            : `Room ${door.room}`;
+          el.classList.remove("hidden");
+        } else {
+          el.classList.add("hidden");
+        }
+      }
+      return;
+    }
+
     if (this.atKitchen()) {
       el.textContent = "SPACE — Load tray";
       el.classList.remove("hidden");
@@ -523,17 +695,23 @@ export class Game {
   updateHud() {
     this.hud.day.textContent = `DAY ${this.save.day}`;
     this.hud.tips.textContent = `$${this.save.tips}`;
-    this.hud.floor.textContent = `FL ${this.floorIdx + 1}`;
+    this.hud.floor.textContent = this.job === "busboy" ? `BB · FL ${this.floorIdx + 1}` : `FL ${this.floorIdx + 1}`;
     if (this.hud.goal) this.hud.goal.textContent = `${this.delivered}/${this.needed}`;
     const t = Math.max(0, Math.ceil(this.shiftTime));
     this.hud.timer.textContent = `${(t / 60) | 0}:${String(t % 60).padStart(2, "0")}`;
     this.hud.combo.textContent = this.combo >= 2 ? `COMBO x${this.combo}` : "";
 
-    this.hud.carry.textContent = this.toast
-      ? this.toast
-      : this.carrying.length
+    if (this.toast) {
+      this.hud.carry.textContent = this.toast;
+    } else if (this.job === "busboy") {
+      this.hud.carry.textContent = this.carrying.length
+        ? `BIN: ${this.carrying.map((c) => c.room).join(" ")}`
+        : "BIN EMPTY";
+    } else {
+      this.hud.carry.textContent = this.carrying.length
         ? "TRAY: " + this.carrying.map((c) => c.room).join(" ")
         : "TRAY EMPTY";
+    }
 
     this.hud.orders.innerHTML = this.orders
       .filter((o) => !o.done)
@@ -544,9 +722,11 @@ export class Game {
         const loaded = this.carrying.some((c) => c.id === o.id);
         const fl = Math.floor(o.room / 100);
         const pct = Math.max(0, Math.min(100, (o.time / o.max) * 100));
+        const tag = this.job === "busboy" ? "DIRTY" : o.food;
+        const held = this.job === "busboy" ? (loaded ? " · BIN" : "") : (loaded ? " · TRAY" : "");
         return `<div class="order-chip ${late ? "late" : ""} ${loaded ? "loaded" : ""}">
-          FL${fl} · ${o.room} ${o.food}
-          <div class="meta">${late ? "LATE!" : `${Math.ceil(o.time)}s`}${loaded ? " · TRAY" : ""}</div>
+          FL${fl} · ${o.room} ${tag}
+          <div class="meta">${late ? "LATE!" : `${Math.ceil(o.time)}s`}${held}</div>
           <div class="bar"><i style="width:${pct}%"></i></div>
         </div>`;
       })
@@ -580,7 +760,8 @@ export class Game {
         this.player.cy,
         this.player.dir,
         this.player.walk,
-        this.carrying.length > 0
+        this.carrying.length > 0,
+        this.job
       );
     }
 
@@ -602,11 +783,22 @@ export class Game {
     const doors = this.floors[this.floorIdx].doors;
     const bob = Math.sin(this.time * 6) * 2;
     for (const d of doors) {
-      const carried = this.carrying.some((c) => c.room === d.room);
-      const pending = hasRadio(this.save) && this.orders.some((o) => !o.done && o.room === d.room);
       const sx = d.x - camX;
-      if (carried) {
-        // bouncing gold diamond
+      const pending = this.orders.some(
+        (o) => !o.done && o.room === d.room && !this.carrying.some((c) => c.id === o.id)
+      );
+      const held = this.job === "waiter" && this.carrying.some((c) => c.room === d.room);
+      const radio = hasRadio(this.save) && pending;
+
+      if (this.job === "busboy" && pending) {
+        // dirty pile marker
+        const my = (d.side === "top" ? d.iy - 18 : d.iy + 12) + bob * 0.5;
+        ctx.fillStyle = "#8a6040";
+        ctx.fillRect(sx - 4, my, 8, 5);
+        ctx.fillStyle = "#d2dae2";
+        ctx.fillRect(sx - 3, my - 2, 3, 2);
+        ctx.fillRect(sx, my - 3, 3, 2);
+      } else if (held) {
         const my = (d.side === "top" ? d.iy - 26 : d.iy + 18) + bob;
         ctx.fillStyle = "#f0c040";
         ctx.save();
@@ -616,9 +808,9 @@ export class Game {
         ctx.restore();
         ctx.fillStyle = "#7a5a10";
         ctx.fillRect(sx - 1, my - 1, 2, 2);
-      } else if (pending) {
+      } else if (radio) {
         const my = d.side === "top" ? d.iy - 20 : d.iy + 14;
-        ctx.fillStyle = "#ff5a7a";
+        ctx.fillStyle = this.job === "busboy" ? "#c9a24a" : "#ff5a7a";
         ctx.fillRect(sx - 1, my, 3, 3);
       }
     }
